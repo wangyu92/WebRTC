@@ -97,7 +97,7 @@ $(function() {
 
 
     ////////////////////////////////////////////////////////////////////////////
-    //  Define RTC peer connection
+    //  Define RTC peer connection - local
 
     let localPeerConnection;
     let remotePeerConnection;
@@ -168,17 +168,6 @@ $(function() {
         }
     }
 
-    // Logs that the connection succeeded.
-    function handleConnectionSuccess(peerConnection) {
-        trace(`${getPeerName(peerConnection)} addIceCandidate success.`);
-    };
-
-    // Logs that the connection failed.
-    function handleConnectionFailure(peerConnection, error) {
-        trace(`${getPeerName(peerConnection)} failed to add ICE Candidate:\n` +
-            `${error.toString()}.`);
-    }
-
     // Logs changes to the connection state.
     function handleConnectionChange(event) {
         const peerConnection = event.target;
@@ -209,21 +198,14 @@ $(function() {
             .catch(setSessionDescriptionError);
     }
 
-    // Logs success when setting session description.
-    function setDescriptionSuccess(peerConnection, functionName) {
-        const peerName = getPeerName(peerConnection);
-        trace(`${peerName} ${functionName} complete.`);
-    }
 
-    // Logs success when localDescription is set.
-    function setLocalDescriptionSuccess(peerConnection) {
-        setDescriptionSuccess(peerConnection, 'setLocalDescription');
-    }
 
-    // Logs error when setting session description fails.
-    function setSessionDescriptionError(error) {
-        trace(`Failed to create session description: ${error.toString()}.`);
-    }
+
+
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    //  Define RTC peer connection - remote
 
     // Logs answer to offer creation and sets peer connection session descriptions.
     function createdAnswer(description) {
@@ -241,6 +223,44 @@ $(function() {
                 setRemoteDescriptionSuccess(localPeerConnection);
             }).catch(setSessionDescriptionError);
     }
+
+
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    //  Define RTC peer connection - for log
+
+
+    // Logs that the connection succeeded.
+    function handleConnectionSuccess(peerConnection) {
+        trace(`${getPeerName(peerConnection)} addIceCandidate success.`);
+    };
+
+    // Logs that the connection failed.
+    function handleConnectionFailure(peerConnection, error) {
+        trace(`${getPeerName(peerConnection)} failed to add ICE Candidate:\n` +
+            `${error.toString()}.`);
+    }
+
+    // Logs success when setting session description.
+    function setDescriptionSuccess(peerConnection, functionName) {
+        const peerName = getPeerName(peerConnection);
+        trace(`${peerName} ${functionName} complete.`);
+    }
+
+    // Logs success when localDescription is set.
+    function setLocalDescriptionSuccess(peerConnection) {
+        setDescriptionSuccess(peerConnection, 'setLocalDescription');
+    }
+
+    // Logs error when setting session description fails.
+    function setSessionDescriptionError(error) {
+        trace(`Failed to create session description: ${error.toString()}.`);
+    }
+
+
+
+
 
 
 

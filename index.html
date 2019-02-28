@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+    <title>모바일시스템 연구실 - WebRTC</title>
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap-theme.min.css">
+    <link href="css/main.css" type="text/css" rel="stylesheet">
+</head>
+
+<body>
+
+    <div class="container-fluid">
+
+        <div class="page-header">
+            <h1>Mobile Systems Lab <small>WebRTC</small></h1>
+        </div>
+
+        <div class="btn-group btn-group-justified" role="group" aria-label="...">
+            <div class="btn-group" role="group">
+                <button id="btn-getstream" type="button" class="btn btn-default">getMediaStream</button>
+            </div>
+            <div class="btn-group" role="group">
+                <button id="btn-call" type="button" class="btn btn-default" disabled>Call</button>
+            </div>
+            <div class="btn-group" role="group">
+                <button id="btn-hangup" type="button" class="btn btn-default" disabled>Hang up</button>
+            </div>
+        </div>
+
+        <div class="row">
+            <video id="local-video" class="col-md-8 col-xs-10 col-md-offset-2 col-xs-offset-1" autoplay playsinline muted></video>
+        </div>
+
+        <div class="row">
+            <video id="remote-video" class="col-md-8 col-xs-10 col-md-offset-2 col-xs-offset-1" autoplay playsinline></video>
+        </div>
+
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/js/bootstrap.min.js"></script>
+    <!-- <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script> -->
+    <script src="js/main.js"></script>
+</body>
+</html>

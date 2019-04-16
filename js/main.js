@@ -1,348 +1,400 @@
-'use strict';
+"use strict";
 
-$(function() {
-    ////////////////////////////////////////////////////////////////////////////
-    //  connecting to html elements & events
+var isChannelReady = false;
+var isInitiator = false;
+var isStarted = false;
+var pc;
+var turnReady;
 
-    //  Videos
-    let localVideo = document.querySelector('#local-video');
-    let remoteVideo = document.querySelector('#remote-video');
+let room = window.prompt("Enter room name : ");
 
-    //  Buttons
-    let $getStreamButton = $('#btn-getstream');
-    let $callButton = $("#btn-call");
-    let $hangupButton = $("#btn-hangup");
+const iceServers = {
+    // 'iceTransportPolicy': 'relay',
+    'iceServers': [{
+            'urls': [
+                'stun:stun.l.google.com:19302',
+                'stun:stun1.l.google.com:19302',
+                'stun:stun2.l.google.com:19302'
+            ]
+        },
+        {
+            'urls': [
+                'turn:ms.hanyang.ac.kr:8801'
+            ],
+            'credential': 'doqemddl',
+            'username': 'wangyu'
+        },
+        {
+            'urls': [
+                'turns:ms.hanyang.ac.kr:8802'
+            ],
+            'credential': 'doqemddl',
+            'username': 'wangyu'
+        }
+    ]
+};
 
-    //  events
-    $getStreamButton.click(function() {
-        navigator.mediaDevices.getUserMedia(mediaStreamConstraints)
-            .then(gotLocalMediaStream).catch(handleLocalMediaStreamError);
-    });
+////////////////////////////////////////////////////////////////////////////
+//  connecting to html elements & events
 
-    $callButton.click(function() {
-        doCall();
-    });
+}
+//  Videos
+let localVideo = document.querySelector('#local-video');
+let remoteVideo = document.querySelector('#remote-video');
 
-    $hangupButton.click(function() {
-        hangup()
-    });
+//  Buttons
+let getStreamButton = document.querySelector('#btn-getstream');
+let callButton = document.querySelector('#btn-call');
+let hangupButton = document.querySelector('#btn-hangup');
+
+//  events
+getStreamButton.onclick = function() {
+    connectSignalingServer();
+
+    navigator.mediaDevices.getUserMedia(mediaStreamConstraints)
+        .then(gotLocalMediaStream).catch(handleLocalMediaStreamError);
+};
+
+callButton.onclick = function() {
+    doCall();
+};
+
+hangupButton.onclick = function() {
+    hangup();
+    handleRemoteHangup();
+};
+
+////////////////////////////////////////////////////////////////////////////
+//  Get video stream
+
+//  Global variables
+let localStream;
+let remoteStream;
+
+const mediaStreamConstraints = {
+    video: true,
+    audio: true,
+};
+
+// Handles success by adding the MediaStream to the video element.
+function gotLocalMediaStream(mediaStream) {
+    localStream = mediaStream;
+    localVideo.srcObject = mediaStream;
+
+    getStreamButton.disabled = true;
+
+    sendMessage('got user media');
+    if (isInitiator) {
+        maybeStart();
+    }
+
+    initBandwidthGraph();
+}
+
+function gotRemoteMediaStream(event) {
+    const mediaStream = event.stream;
+    remoteVideo.srcObject = mediaStream;
+    remoteStream = mediaStream;
+
+    trace('Remote peer connection received remote stream.');
+}
+
+// Handles error by logging a message to the console with the error message.
+function handleLocalMediaStreamError(error) {
+    console.log('navigator.getUserMedia error: ', error);
+}
 
 
-    ////////////////////////////////////////////////////////////////////////////
-    //  Get video stream
 
-    //  Global variables
-    let localStream;
-    let remoteStream;
+////////////////////////////////////////////////////////////////////////////
+//  Events for videos
 
-    const mediaStreamConstraints = {
-        video: true,
-        audio: true,
-    };
+function logVideoLoaded(event) {
+    const video = event.target;
+    trace(`${video.id} videoWidth: ${video.videoWidth}px, ` +
+        `videoHeight: ${video.videoHeight}px.`);
+}
 
-    // Handles success by adding the MediaStream to the video element.
-    function gotLocalMediaStream(mediaStream) {
-        localStream = mediaStream;
-        localVideo.srcObject = mediaStream;
+// Logs a message with the id and size of a video element.
+// This event is fired when video begins streaming.
+function logResizedVideo(event) {
+    logVideoLoaded(event);
 
-        $getStreamButton.prop("disabled", true);
+    if (startTime) {
+        const elapsedTime = window.performance.now() - startTime;
+        startTime = null;
+        trace(`Setup time: ${elapsedTime.toFixed(3)}ms.`);
+    }
+}
 
-        sendMessage('got user media');
+localVideo.addEventListener('loadedmetadata', logVideoLoaded);
+remoteVideo.addEventListener('loadedmetadata', logVideoLoaded);
+remoteVideo.addEventListener('onresize', logResizedVideo);
+
+
+////////////////////////////////////////////////////////////////////////////
+//  PeerConnection
+
+function maybeStart() {
+    console.log('>>>>>>> maybeStart() ', isStarted, localStream, isChannelReady);
+    if (!isStarted && typeof localStream !== 'undefined' && isChannelReady) {
+        console.log('>>>>>> creating peer connection');
+        createPeerConnection();
+        pc.addStream(localStream);
+        isStarted = true;
+        console.log('isInitiator', isInitiator);
         if (isInitiator) {
-            maybeStart();
+            callButton.disabled = false;
         }
     }
+}
 
-    function gotRemoteMediaStream(event) {
-        const mediaStream = event.stream;
-        remoteVideo.srcObject = mediaStream;
-        remoteStream = mediaStream;
-
-        trace('Remote peer connection received remote stream.');
+function createPeerConnection() {
+    try {
+        pc = new RTCPeerConnection(iceServers);
+        pc.onicecandidate = handleIceCandidate;
+        pc.onaddstream = handleRemoteStreamAdded;
+        pc.onremovestream = handleRemoteStreamRemoved;
+        console.log('Created RTCPeerConnnection');
+    } catch (e) {
+        console.log('Failed to create PeerConnection, exception: ' + e.message);
+        alert('Cannot create RTCPeerConnection object.');
+        return;
     }
+}
 
-    // Handles error by logging a message to the console with the error message.
-    function handleLocalMediaStreamError(error) {
-        console.log('navigator.getUserMedia error: ', error);
+function handleIceCandidate(event) {
+    console.log('icecandidate event: ', event);
+    if (event.candidate) {
+        sendMessage({
+            type: 'candidate',
+            label: event.candidate.sdpMLineIndex,
+            id: event.candidate.sdpMid,
+            candidate: event.candidate.candidate
+        });
+    } else {
+        console.log('End of candidates.');
     }
+}
+
+function handleRemoteStreamAdded(event) {
+    console.log('Remote stream added.');
+    remoteStream = event.stream;
+    remoteVideo.srcObject = remoteStream;
+}
+
+function handleRemoteStreamRemoved(event) {
+    console.log('Remote stream removed. Event: ', event);
+}
+
+window.onbeforeunload = function() {
+    sendMessage('bye');
+};
+
+////////////////////////////////////////////////////////////////////////////
+
+function doCall() {
+    console.log('Sending offer to peer');
+    pc.createOffer(setLocalAndSendMessage, handleCreateOfferError);
+}
+
+function doAnswer() {
+    console.log('Sending answer to peer.');
+    pc.createAnswer().then(
+        setLocalAndSendMessage,
+        onCreateSessionDescriptionError
+    );
+}
+
+function setLocalAndSendMessage(sessionDescription) {
+    pc.setLocalDescription(sessionDescription);
+    console.log('setLocalAndSendMessage sending message', sessionDescription);
+    sendMessage(sessionDescription);
+}
+
+function handleCreateOfferError(event) {
+    console.log('createOffer() error: ', event);
+}
+
+function onCreateSessionDescriptionError(error) {
+    trace('Failed to create session description: ' + error.toString());
+}
+
+////////////////////////////////////////////////////////////////////////////
+
+
+function hangup() {
+    console.log('Hanging up.');
+    stop();
+    sendMessage('bye');
+}
+
+function handleRemoteHangup() {
+    console.log('Session terminated.');
+    stop();
+    isInitiator = false;
+}
+
+function stop() {
+    isStarted = false;
+    pc.close();
+    pc = null;
+}
 
 
 
-    ////////////////////////////////////////////////////////////////////////////
-    //  Events for videos
+////////////////////////////////////////////////////////////////////////////
+//  Bandwidth
 
-    let startTime = null;
+let bandwidthSelector = document.querySelector('select#bandwidth');
 
-    function logVideoLoaded(event) {
-        const video = event.target;
-        trace(`${video.id} videoWidth: ${video.videoWidth}px, ` +
-            `videoHeight: ${video.videoHeight}px.`);
-    }
 
-    // Logs a message with the id and size of a video element.
-    // This event is fired when video begins streaming.
-    function logResizedVideo(event) {
-        logVideoLoaded(event);
+let maxBandwidth = 0;
 
-        if (startTime) {
-            const elapsedTime = window.performance.now() - startTime;
-            startTime = null;
-            trace(`Setup time: ${elapsedTime.toFixed(3)}ms.`);
+let bitrateGraph;
+let bitrateSeries;
+
+let packetGraph;
+let packetSeries;
+
+let lastResult;
+
+function initBandwidthGraph() {
+    bitrateSeries = new TimelineDataSeries();
+    bitrateGraph = new TimelineGraphView('bitrateGraph', 'bitrateCanvas');
+    bitrateGraph.updateEndDate();
+
+    packetSeries = new TimelineDataSeries();
+    packetGraph = new TimelineGraphView('packetGraph', 'packetCanvas');
+    packetGraph.updateEndDate();
+}
+
+// renegotiate bandwidth on the fly.
+bandwidthSelector.onchange = () => {
+    bandwidthSelector.disabled = true;
+    const bandwidth = bandwidthSelector.options[bandwidthSelector.selectedIndex].value;
+
+    // In Chrome, use RTCRtpSender.setParameters to change bandwidth without
+    // (local) renegotiation. Note that this will be within the envelope of
+    // the initial maximum bandwidth negotiated via SDP.
+    if ((adapter.browserDetails.browser === 'chrome' ||
+            (adapter.browserDetails.browser === 'firefox' &&
+                adapter.browserDetails.version >= 64)) &&
+        'RTCRtpSender' in window &&
+        'setParameters' in window.RTCRtpSender.prototype) {
+        const sender = pc.getSenders()[0];
+        const parameters = sender.getParameters();
+        if (!parameters.encodings) {
+            parameters.encodings = [{}];
         }
-    }
-
-    localVideo.addEventListener('loadedmetadata', logVideoLoaded);
-    remoteVideo.addEventListener('loadedmetadata', logVideoLoaded);
-    remoteVideo.addEventListener('onresize', logResizedVideo);
-
-
-    ////////////////////////////////////////////////////////////////////////////
-    //  Signaling
-
-
-
-    var isChannelReady = false;
-    var isInitiator = false;
-    var isStarted = false;
-    var pc;
-    var turnReady;
-
-    var pcConfig = {
-        'iceServers': [{
-            'urls': 'stun:stun.l.google.com:19302'
-        }]
-    };
-
-    // Set up audio and video regardless of what devices are present.
-    var sdpConstraints = {
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true
-    };
-
-    /////////////////////////////////////////////
-
-    var room = 'foo';
-
-    var socket = io("https://ms.hanyang.ac.kr:8800").connect();
-
-    if (room !== '') {
-        socket.emit('create or join', room);
-        console.log('Attempted to create or  join room', room);
-    }
-
-    socket.on('created', function(room) {
-        console.log('Created room ' + room);
-        isInitiator = true;
-    });
-
-    socket.on('full', function(room) {
-        console.log('Room ' + room + ' is full');
-    });
-
-    socket.on('join', function(room) {
-        console.log('Another peer made a request to join room ' + room);
-        console.log('This peer is the initiator of room ' + room + '!');
-        isChannelReady = true;
-    });
-
-    socket.on('joined', function(room) {
-        console.log('joined: ' + room);
-        isChannelReady = true;
-    });
-
-    socket.on('log', function(array) {
-        console.log.apply(console, array);
-    });
-
-    ////////////////////////////////////////////////
-
-    function sendMessage(message) {
-        console.log('Client sending message: ', message);
-        socket.emit('message', message);
-    }
-
-    // This client receives a message
-    socket.on('message', function(message) {
-        console.log('Client received message:', message);
-        if (message === 'got user media') {
-            maybeStart();
-        } else if (message.type === 'offer') {
-            if (!isInitiator && !isStarted) {
-                maybeStart();
-            }
-            pc.setRemoteDescription(new RTCSessionDescription(message));
-            doAnswer();
-        } else if (message.type === 'answer' && isStarted) {
-            pc.setRemoteDescription(new RTCSessionDescription(message));
-        } else if (message.type === 'candidate' && isStarted) {
-            var candidate = new RTCIceCandidate({
-                sdpMLineIndex: message.label,
-                candidate: message.candidate
-            });
-            pc.addIceCandidate(candidate);
-        } else if (message === 'bye' && isStarted) {
-            handleRemoteHangup();
-        }
-    });
-
-    ////////////////////////////////////////////////////
-
-    function maybeStart() {
-        console.log('>>>>>>> maybeStart() ', isStarted, localStream, isChannelReady);
-        if (!isStarted && typeof localStream !== 'undefined' && isChannelReady) {
-            console.log('>>>>>> creating peer connection');
-            createPeerConnection();
-            pc.addStream(localStream);
-            isStarted = true;
-            console.log('isInitiator', isInitiator);
-            if (isInitiator) {
-                $callButton.prop("disabled", false);
-            }
-        }
-    }
-
-    window.onbeforeunload = function() {
-        sendMessage('bye');
-    };
-
-    /////////////////////////////////////////////////////////
-
-    function createPeerConnection() {
-        try {
-            pc = new RTCPeerConnection(null);
-            pc.onicecandidate = handleIceCandidate;
-            pc.onaddstream = handleRemoteStreamAdded;
-            pc.onremovestream = handleRemoteStreamRemoved;
-            console.log('Created RTCPeerConnnection');
-        } catch (e) {
-            console.log('Failed to create PeerConnection, exception: ' + e.message);
-            alert('Cannot create RTCPeerConnection object.');
-            return;
-        }
-    }
-
-    function handleIceCandidate(event) {
-        console.log('icecandidate event: ', event);
-        if (event.candidate) {
-            sendMessage({
-                type: 'candidate',
-                label: event.candidate.sdpMLineIndex,
-                id: event.candidate.sdpMid,
-                candidate: event.candidate.candidate
-            });
+        if (bandwidth === 'unlimited') {
+            delete parameters.encodings[0].maxBitrate;
         } else {
-            console.log('End of candidates.');
+            parameters.encodings[0].maxBitrate = bandwidth * 1000;
         }
+        sender.setParameters(parameters)
+            .then(() => {
+                bandwidthSelector.disabled = false;
+            })
+            .catch(e => console.error(e));
+        return;
     }
-
-    function handleCreateOfferError(event) {
-        console.log('createOffer() error: ', event);
-    }
-
-    function doCall() {
-        console.log('Sending offer to peer');
-        pc.createOffer(setLocalAndSendMessage, handleCreateOfferError);
-    }
-
-    function doAnswer() {
-        console.log('Sending answer to peer.');
-        pc.createAnswer().then(
-            setLocalAndSendMessage,
-            onCreateSessionDescriptionError
-        );
-    }
-
-    function setLocalAndSendMessage(sessionDescription) {
-        pc.setLocalDescription(sessionDescription);
-        console.log('setLocalAndSendMessage sending message', sessionDescription);
-        sendMessage(sessionDescription);
-    }
-
-    function onCreateSessionDescriptionError(error) {
-        trace('Failed to create session description: ' + error.toString());
-    }
-
-    function requestTurn(turnURL) {
-        var turnExists = false;
-        for (var i in pcConfig.iceServers) {
-            if (pcConfig.iceServers[i].urls.substr(0, 5) === 'turn:') {
-                turnExists = true;
-                turnReady = true;
-                break;
-            }
-        }
-        if (!turnExists) {
-            console.log('Getting TURN server from ', turnURL);
-            // No TURN server. Get one from computeengineondemand.appspot.com:
-            var xhr = new XMLHttpRequest();
-            xhr.onreadystatechange = function() {
-                if (xhr.readyState === 4 && xhr.status === 200) {
-                    var turnServer = JSON.parse(xhr.responseText);
-                    console.log('Got TURN server: ', turnServer);
-                    pcConfig.iceServers.push({
-                        'urls': 'turn:' + turnServer.username + '@' + turnServer.turn,
-                        'credential': turnServer.password
-                    });
-                    turnReady = true;
-                }
+    // Fallback to the SDP munging with local renegotiation way of limiting
+    // the bandwidth.
+    pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer))
+        .then(() => {
+            const desc = {
+                type: pc.remoteDescription.type,
+                sdp: bandwidth === 'unlimited' ?
+                    removeBandwidthRestriction(pc.remoteDescription.sdp) : updateBandwidthRestriction(pc.remoteDescription.sdp, bandwidth)
             };
-            xhr.open('GET', turnURL, true);
-            xhr.send();
-        }
+            console.log('Applying bandwidth restriction to setRemoteDescription:\n' +
+                desc.sdp);
+            return pc.setRemoteDescription(desc);
+        })
+        .then(() => {
+            bandwidthSelector.disabled = false;
+        })
+        .catch(onSetSessionDescriptionError);
+};
+
+function updateBandwidthRestriction(sdp, bandwidth) {
+    let modifier = 'AS';
+    if (adapter.browserDetails.browser === 'firefox') {
+        bandwidth = (bandwidth >>> 0) * 1000;
+        modifier = 'TIAS';
     }
-
-    function handleRemoteStreamAdded(event) {
-        console.log('Remote stream added.');
-        remoteStream = event.stream;
-        remoteVideo.srcObject = remoteStream;
+    if (sdp.indexOf('b=' + modifier + ':') === -1) {
+        // insert b= after c= line.
+        sdp = sdp.replace(/c=IN (.*)\r\n/, 'c=IN $1\r\nb=' + modifier + ':' + bandwidth + '\r\n');
+    } else {
+        sdp = sdp.replace(new RegExp('b=' + modifier + ':.*\r\n'), 'b=' + modifier + ':' + bandwidth + '\r\n');
     }
+    return sdp;
+}
 
-    function handleRemoteStreamRemoved(event) {
-        console.log('Remote stream removed. Event: ', event);
+function removeBandwidthRestriction(sdp) {
+    return sdp.replace(/b=AS:.*\r\n/, '').replace(/b=TIAS:.*\r\n/, '');
+}
+
+// query getStats every second
+window.setInterval(() => {
+    if (!pc) {
+        return;
     }
-
-    function hangup() {
-        console.log('Hanging up.');
-        stop();
-        sendMessage('bye');
+    const sender = pc.getSenders()[0];
+    if (!sender) {
+        return;
     }
+    sender.getStats().then(res => {
+        res.forEach(report => {
+            let bytes;
+            let packets;
+            if (report.type === 'outbound-rtp') {
+                if (report.isRemote) {
+                    return;
+                }
+                const now = report.timestamp;
+                bytes = report.bytesSent;
+                packets = report.packetsSent;
+                if (lastResult && lastResult.has(report.id)) {
+                    // calculate bitrate
+                    const bitrate = 8 * (bytes - lastResult.get(report.id).bytesSent) /
+                        (now - lastResult.get(report.id).timestamp);
 
-    function handleRemoteHangup() {
-        console.log('Session terminated.');
-        stop();
-        isInitiator = false;
-    }
+                    // append to chart
+                    bitrateSeries.addPoint(now, bitrate);
+                    bitrateGraph.setDataSeries([bitrateSeries]);
+                    bitrateGraph.updateEndDate();
 
-    function stop() {
-        isStarted = false;
-        pc.close();
-        pc = null;
-    }
+                    // calculate number of packets and append to chart
+                    packetSeries.addPoint(now, packets -
+                        lastResult.get(report.id).packetsSent);
+                    packetGraph.setDataSeries([packetSeries]);
+                    packetGraph.updateEndDate();
+                }
+            }
+        });
+        lastResult = res;
+    });
+}, 1000);
 
 
+////////////////////////////////////////////////////////////////////////////
+//  Utils & for log
 
+let startTime = null;
 
-    ////////////////////////////////////////////////////////////////////////////
-    //  Utils
+function sendMessage(message) {
+    console.log('Client sending message: ', message);
+    socket.emit('message', message);
+}
 
-    // Gets the "other" peer connection.
-    function getOtherPeer(peerConnection) {
-        return (peerConnection === localPeerConnection) ?
-            remotePeerConnection : localPeerConnection;
-    }
+// Logs an action (text) and the time when it happened on the console.
+function trace(text) {
+    text = text.trim();
+    const now = (window.performance.now() / 1000).toFixed(3);
 
-    // Gets the name of a certain peer connection.
-    function getPeerName(peerConnection) {
-        return (peerConnection === localPeerConnection) ?
-            'localPeerConnection' : 'remotePeerConnection';
-    }
-
-    // Logs an action (text) and the time when it happened on the console.
-    function trace(text) {
-        text = text.trim();
-        const now = (window.performance.now() / 1000).toFixed(3);
-
-        console.log(now, text);
-    }
-
-});
+    console.log(now, text);
+}

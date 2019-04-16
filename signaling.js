@@ -17,29 +17,21 @@ var app = http.createServer(options, function(req, res) {
 }).listen(8800);
 
 
-
-
 var io = socketIO.listen(app);
 io.sockets.on('connection', function(socket) {
 
-    // convenience function to log server messages on the client
-    function log() {
-        var array = ['Message from server:'];
-        array.push.apply(array, arguments);
-        socket.emit('log', array);
-    }
-
-    socket.on('message', function(message) {
+    socket.on('message', function(message, room) {
         log('Client said: ', message);
         // for a real app, would be room-only (not broadcast)
         socket.broadcast.emit('message', message);
+        // socket.to(room).emit('message', message);
     });
 
     socket.on('create or join', function(room) {
         log('Received request to create or join room ' + room);
 
-        var clientsInRoom = io.sockets.adapter.rooms[room];
-        var numClients = clientsInRoom ? Object.keys(clientsInRoom.sockets).length : 0;
+
+        var numClients = getNumClients(room);
         log('Room ' + room + ' now has ' + numClients + ' client(s)');
 
         if (numClients === 0) {
@@ -57,6 +49,23 @@ io.sockets.on('connection', function(socket) {
             socket.emit('full', room);
         }
     });
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    //  Utility functions
+
+    function getNumClients(room) {
+        var clientsInRoom = io.sockets.adapter.rooms[room];
+        var numClients = clientsInRoom ? Object.keys(clientsInRoom.sockets).length : 0;
+        return numClients;
+    }
+
+    // convenience function to log server messages on the client
+    function log() {
+        var array = ['Message from server:'];
+        array.push.apply(array, arguments);
+        socket.emit('log', array);
+    }
 
     socket.on('ipaddr', function() {
         var ifaces = os.networkInterfaces();

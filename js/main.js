@@ -1,12 +1,7 @@
 "use strict";
 
-var isChannelReady = false;
-var isInitiator = false;
-var isStarted = false;
-var pc;
-var turnReady;
-
-let room = window.prompt("Enter room name : ");
+let pc;
+let turnReady;
 
 const iceServers = {
     // 'iceTransportPolicy': 'relay',
@@ -34,10 +29,12 @@ const iceServers = {
     ]
 };
 
+let signalingClient = new SignalingClient(iceServers);
+let room;
+
 ////////////////////////////////////////////////////////////////////////////
 //  connecting to html elements & events
 
-}
 //  Videos
 let localVideo = document.querySelector('#local-video');
 let remoteVideo = document.querySelector('#remote-video');
@@ -49,7 +46,8 @@ let hangupButton = document.querySelector('#btn-hangup');
 
 //  events
 getStreamButton.onclick = function() {
-    connectSignalingServer();
+    room = window.prompt("Enter room name : ");
+    signalingClient.joinRoom(room);
 
     navigator.mediaDevices.getUserMedia(mediaStreamConstraints)
         .then(gotLocalMediaStream).catch(handleLocalMediaStreamError);
@@ -63,6 +61,45 @@ hangupButton.onclick = function() {
     hangup();
     handleRemoteHangup();
 };
+
+////////////////////////////////////////////////////////////////////////////
+//  Set event listener for signaling
+signalingClient.setEventListener('created', room => {
+    console.log('Created room = ' + room);
+});
+
+signalingClient.setEventListener('joined', room => {
+    console.log('joined: ' + room);
+});
+
+signalingClient.setEventListener('join', room => {
+    console.log('Another peer made a request to join room ' + room);
+    console.log('This peer is the initiator of room ' + room + '!');
+});
+
+signalingClient.setEventListener('message', message => {
+    console.log('Client received message:', message);
+
+    if (message === 'got user media') {
+        maybeStart();
+    } else if (message.type === 'offer') {
+        if (!signalingClient._initiator && !signalingClient._started) {
+            maybeStart();
+        }
+        pc.setRemoteDescription(new RTCSessionDescription(message));
+        doAnswer();
+    } else if (message.type === 'answer' && signalingClient._started) {
+        pc.setRemoteDescription(new RTCSessionDescription(message));
+    } else if (message.type === 'candidate' && signalingClient._started) {
+        var candidate = new RTCIceCandidate({
+            sdpMLineIndex: message.label,
+            candidate: message.candidate
+        });
+        pc.addIceCandidate(candidate);
+    } else if (message === 'bye' && signalingClient._started) {
+        handleRemoteHangup();
+    }
+});
 
 ////////////////////////////////////////////////////////////////////////////
 //  Get video stream
@@ -83,8 +120,8 @@ function gotLocalMediaStream(mediaStream) {
 
     getStreamButton.disabled = true;
 
-    sendMessage('got user media');
-    if (isInitiator) {
+    signalingClient.sendMessage('got user media');
+    if (signalingClient._initiator) {
         maybeStart();
     }
 
@@ -136,14 +173,14 @@ remoteVideo.addEventListener('onresize', logResizedVideo);
 //  PeerConnection
 
 function maybeStart() {
-    console.log('>>>>>>> maybeStart() ', isStarted, localStream, isChannelReady);
-    if (!isStarted && typeof localStream !== 'undefined' && isChannelReady) {
+    console.log('>>>>>>> maybeStart() ', signalingClient._started, localStream, signalingClient._channelReady);
+    if (!signalingClient._started && typeof localStream !== 'undefined' && signalingClient._channelReady) {
         console.log('>>>>>> creating peer connection');
         createPeerConnection();
         pc.addStream(localStream);
-        isStarted = true;
-        console.log('isInitiator', isInitiator);
-        if (isInitiator) {
+        signalingClient._started = true;
+        console.log('isInitiator', signalingClient._initiator);
+        if (signalingClient._initiator) {
             callButton.disabled = false;
         }
     }
@@ -158,7 +195,7 @@ function createPeerConnection() {
         console.log('Created RTCPeerConnnection');
     } catch (e) {
         console.log('Failed to create PeerConnection, exception: ' + e.message);
-        alert('Cannot create RTCPeerConnection object.');
+        window.alert('Cannot create RTCPeerConnection object.');
         return;
     }
 }
@@ -166,7 +203,7 @@ function createPeerConnection() {
 function handleIceCandidate(event) {
     console.log('icecandidate event: ', event);
     if (event.candidate) {
-        sendMessage({
+        signalingClient.sendMessage({
             type: 'candidate',
             label: event.candidate.sdpMLineIndex,
             id: event.candidate.sdpMid,
@@ -188,7 +225,7 @@ function handleRemoteStreamRemoved(event) {
 }
 
 window.onbeforeunload = function() {
-    sendMessage('bye');
+    signalingClient.sendMessage('bye');
 };
 
 ////////////////////////////////////////////////////////////////////////////
@@ -209,7 +246,7 @@ function doAnswer() {
 function setLocalAndSendMessage(sessionDescription) {
     pc.setLocalDescription(sessionDescription);
     console.log('setLocalAndSendMessage sending message', sessionDescription);
-    sendMessage(sessionDescription);
+    signalingClient.sendMessage(sessionDescription);
 }
 
 function handleCreateOfferError(event) {
@@ -226,17 +263,17 @@ function onCreateSessionDescriptionError(error) {
 function hangup() {
     console.log('Hanging up.');
     stop();
-    sendMessage('bye');
+    signalingClient.sendMessage('bye');
 }
 
 function handleRemoteHangup() {
     console.log('Session terminated.');
     stop();
-    isInitiator = false;
+    signalingClient._initiator = false;
 }
 
 function stop() {
-    isStarted = false;
+    signalingClient._started = false;
     pc.close();
     pc = null;
 }
@@ -386,10 +423,7 @@ window.setInterval(() => {
 
 let startTime = null;
 
-function sendMessage(message) {
-    console.log('Client sending message: ', message);
-    socket.emit('message', message);
-}
+
 
 // Logs an action (text) and the time when it happened on the console.
 function trace(text) {

@@ -17,8 +17,31 @@ class SignalingClient {
         this._socket = io(this._server);
         this._initiator = false;
         this._channelReady = false;
+        this._started = false;
+        this._eventMap = new Map();
 
         this.addEventListenerOfSocekt();
+    }
+
+    /**
+     * [sendMessage description]
+     * 서버로 메시지를 보냄.
+     * @param  {[type]} message [description]
+     * @return {[type]}         [description]
+     */
+    sendMessage(message) {
+        console.log('Client sending message: ', message);
+        this._socket.emit('message', message);
+    }
+
+    /**
+     * [setEventListener description]
+     * 이벤트맵에 받아볼 이벤트를 등록하는 함수.
+     * @param {[type]} event [description]
+     * @param {[type]} func  [description]
+     */
+    setEventListener(eventName, func) {
+        this._eventMap.set(eventName, func);
     }
 
     /**
@@ -71,47 +94,48 @@ class SignalingClient {
      * 리스너를 붙여주는 함수. 객체 생성 후 서버와 연결이 되고나면 반드시 실행해준다.
      */
     addEventListenerOfSocekt() {
+        const self = this;
+
         //  방 생성자가 방 생성에 성공하면 수신
         this._socket.on('created', function(room) {
-            this._initiator = true;
+            self._initiator = true;
+
+            //  event delegation을 위함.
+            let func = self._eventMap.get('created');
+            if(func !== 'undefined') {
+                func(room);
+            }
         });
 
         //  방 생성자가 아닌 사람이 join하면 수신
         this._socket.on('joined', function(room) {
-            console.log('joined: ' + room);
-            this._channelReady = true;
+            self._channelReady = true;
+
+            //  event delegation을 위함
+            let func = self._eventMap.get('joined');
+            if(func !== 'undefined') {
+                func(room);
+            }
         });
 
         //  다른 피어가 접속하면 수신
         this._socket.on('join', function(room) {
-            console.log('Another peer made a request to join room ' + room);
-            console.log('This peer is the initiator of room ' + room + '!');
-            this._channelReady = true;
+            self._channelReady = true;
+
+            //  event delegation을 위함
+            let func = self._eventMap.get('join');
+            if(func !== 'undefined') {
+                func(room);
+            }
         });
 
 
         // This client receives a message
         this._socket.on('message', function(message) {
-            console.log('Client received message:', message);
-
-            if (message === 'got user media') {
-                maybeStart();
-            } else if (message.type === 'offer') {
-                if (!isInitiator && !isStarted) {
-                    maybeStart();
-                }
-                pc.setRemoteDescription(new RTCSessionDescription(message));
-                doAnswer();
-            } else if (message.type === 'answer' && isStarted) {
-                pc.setRemoteDescription(new RTCSessionDescription(message));
-            } else if (message.type === 'candidate' && isStarted) {
-                var candidate = new RTCIceCandidate({
-                    sdpMLineIndex: message.label,
-                    candidate: message.candidate
-                });
-                pc.addIceCandidate(candidate);
-            } else if (message === 'bye' && isStarted) {
-                handleRemoteHangup();
+            //  event delegation을 위함
+            let func = self._eventMap.get('message');
+            if(func !== 'undefined') {
+                func(message);
             }
         });
 
@@ -130,14 +154,3 @@ class SignalingClient {
         });
     }
 }
-
-checkTURNServer({
-    url: 'turn:ms.hanyang.ac.kr:88011',
-    username: 'wangyu',
-    credential: 'doqemddl'
-}).then(function(bool) {
-    console.log('is TURN server active? ', bool ? 'yes' : 'no');
-    if (!bool) {
-        window.alert('TURN 서버로부터 응답이 없습니다. NAT 환경에서는 동작하지 않을 수 있습니다.');
-    }
-}).catch(console.error.bind(console));

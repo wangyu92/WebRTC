@@ -15,12 +15,54 @@ class SignalingClient {
         this._server = "https://ms.hanyang.ac.kr:8800";
         this._iceServer = iceServers;
         this._socket = io(this._server);
+
+        /**
+         * 방 생성자가 방을 생성하면 True가 됨.
+         *
+         * @type {Boolean}
+         */
         this._initiator = false;
+
+        /**
+         * 상대방이 접속하면 True가 됨.
+         *
+         * @type {Boolean}
+         */
         this._channelReady = false;
+
+        /**
+         * 통신이 시작되면 True가 됨.
+         * @type {Boolean}
+         */
         this._started = false;
+
+        /**
+         * 이벤트가 발생했을 때 delgate 하기위한 함수를 보관하는 Map
+         * @type {Map}
+         */
         this._eventMap = new Map();
 
         this.addEventListenerOfSocekt();
+    }
+
+    /**
+     * 방을 생성한 클라이언트인지 아닌지
+     * @return {Boolean} [description]
+     */
+    isInitiator() {
+        return this._initiator;
+    }
+
+    /**
+     * 상대가 접속하여 서로 통신할 준비가 되었는지. 즉, 같은 방에 두명 이상이 있는지.
+     * @return {Boolean} [description]
+     */
+    isChannelReady() {
+        return this._channelReady;
+    }
+
+    isStarted() {
+        return this._started;
     }
 
     /**
@@ -140,9 +182,11 @@ class SignalingClient {
         });
 
         this._socket.io.on('connect_error', function(err) {
-            // alert("Signaling 서버가 동작하지 않습니다.");
-            getStreamButton.disabled = true;
-            hangupButton.disabled = true;
+            //  event delegation을 위함
+            let func = self._eventMap.get('connect_error');
+            if(func !== 'undefined') {
+                func(err);
+            }
         });
 
         this._socket.on('full', function(room) {

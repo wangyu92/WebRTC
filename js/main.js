@@ -83,22 +83,27 @@ signalingClient.setEventListener('message', message => {
     if (message === 'got user media') {
         maybeStart();
     } else if (message.type === 'offer') {
-        if (!signalingClient._initiator && !signalingClient._started) {
+        if (!signalingClient.isInitiator() && !signalingClient.isStarted()) {
             maybeStart();
         }
         pc.setRemoteDescription(new RTCSessionDescription(message));
         doAnswer();
-    } else if (message.type === 'answer' && signalingClient._started) {
+    } else if (message.type === 'answer' && signalingClient.isStarted()) {
         pc.setRemoteDescription(new RTCSessionDescription(message));
-    } else if (message.type === 'candidate' && signalingClient._started) {
+    } else if (message.type === 'candidate' && signalingClient.isStarted()) {
         var candidate = new RTCIceCandidate({
             sdpMLineIndex: message.label,
             candidate: message.candidate
         });
         pc.addIceCandidate(candidate);
-    } else if (message === 'bye' && signalingClient._started) {
+    } else if (message === 'bye' && signalingClient.isStarted()) {
         handleRemoteHangup();
     }
+});
+
+signalingClient.setEventListener('connect_error', error => {
+    getStreamButton.disabled = true;
+    hangupButton.disabled = true;
 });
 
 ////////////////////////////////////////////////////////////////////////////
@@ -121,7 +126,7 @@ function gotLocalMediaStream(mediaStream) {
     getStreamButton.disabled = true;
 
     signalingClient.sendMessage('got user media');
-    if (signalingClient._initiator) {
+    if (signalingClient.isInitiator()) {
         maybeStart();
     }
 
@@ -167,62 +172,6 @@ function logResizedVideo(event) {
 localVideo.addEventListener('loadedmetadata', logVideoLoaded);
 remoteVideo.addEventListener('loadedmetadata', logVideoLoaded);
 remoteVideo.addEventListener('onresize', logResizedVideo);
-
-
-////////////////////////////////////////////////////////////////////////////
-//  PeerConnection
-
-function maybeStart() {
-    console.log('>>>>>>> maybeStart() ', signalingClient._started, localStream, signalingClient._channelReady);
-    if (!signalingClient._started && typeof localStream !== 'undefined' && signalingClient._channelReady) {
-        console.log('>>>>>> creating peer connection');
-        createPeerConnection();
-        pc.addStream(localStream);
-        signalingClient._started = true;
-        console.log('isInitiator', signalingClient._initiator);
-        if (signalingClient._initiator) {
-            callButton.disabled = false;
-        }
-    }
-}
-
-function createPeerConnection() {
-    try {
-        pc = new RTCPeerConnection(iceServers);
-        pc.onicecandidate = handleIceCandidate;
-        pc.onaddstream = handleRemoteStreamAdded;
-        pc.onremovestream = handleRemoteStreamRemoved;
-        console.log('Created RTCPeerConnnection');
-    } catch (e) {
-        console.log('Failed to create PeerConnection, exception: ' + e.message);
-        window.alert('Cannot create RTCPeerConnection object.');
-        return;
-    }
-}
-
-function handleIceCandidate(event) {
-    console.log('icecandidate event: ', event);
-    if (event.candidate) {
-        signalingClient.sendMessage({
-            type: 'candidate',
-            label: event.candidate.sdpMLineIndex,
-            id: event.candidate.sdpMid,
-            candidate: event.candidate.candidate
-        });
-    } else {
-        console.log('End of candidates.');
-    }
-}
-
-function handleRemoteStreamAdded(event) {
-    console.log('Remote stream added.');
-    remoteStream = event.stream;
-    remoteVideo.srcObject = remoteStream;
-}
-
-function handleRemoteStreamRemoved(event) {
-    console.log('Remote stream removed. Event: ', event);
-}
 
 window.onbeforeunload = function() {
     signalingClient.sendMessage('bye');

@@ -1,6 +1,6 @@
 "use strict";
 
-let pc;
+const signalingServer = "https://ms.hanyang.ac.kr:8800"
 
 const iceServers = {
     // 'iceTransportPolicy': 'relay',
@@ -28,9 +28,17 @@ const iceServers = {
     ]
 };
 
-let signalingClient = new SignalingClient(iceServers);
+const mediaStreamConstraints = {
+    video: true,
+    audio: false,
+};
+
+let localStream;
+let remoteStream;
+
+let signalingClient = new SignalingClient(signalingServer, iceServers);
 let peerConnectionController = new PeerConnectionController();
-let room;
+let localStreamController = new LocalStreamController(mediaStreamConstraints);
 
 ////////////////////////////////////////////////////////////////////////////
 //  connecting to html elements & events
@@ -46,11 +54,19 @@ let hangupButton = document.querySelector('#btn-hangup');
 
 //  events
 getStreamButton.onclick = function() {
-    room = window.prompt("Enter room name : ");
+    const room = window.prompt("Enter room name : ");
     signalingClient.joinRoom(room);
 
-    navigator.mediaDevices.getUserMedia(mediaStreamConstraints)
-        .then(gotLocalMediaStream).catch(handleLocalMediaStreamError);
+    const prom = localStreamController.getLocalMediaStream();
+    prom.then(function(stream) {
+        localStream = stream;
+        localVideo.srcObject = localStream;
+        getStreamButton.disabled = true;
+        signalingClient.sendMessage('got user media');
+    })
+    .catch(function(error) {
+        console.log(error);
+    });
 };
 
 callButton.onclick = function() {
@@ -58,8 +74,11 @@ callButton.onclick = function() {
 };
 
 hangupButton.onclick = function() {
-    hangup();
-    handleRemoteHangup();
+    peerConnectionController.close();
+    signalingClient.close();
+
+    console.log('Hanging up.');
+    signalingClient.sendMessage('bye');
 };
 
 ////////////////////////////////////////////////////////////////////////////
@@ -120,7 +139,7 @@ signalingClient.setEventListener('message', message => {
     }
 
     else if (message === 'bye' && signalingClient.isStarted()) {
-        handleRemoteHangup();
+        hangupButton.click();
     }
 });
 
@@ -176,65 +195,11 @@ peerConnectionController.setEventListener('onCreateSessionDescriptionError', (er
     trace('Failed to create session description: ' + error.toString());
 });
 
-////////////////////////////////////////////////////////////////////////////
-//  Get video stream
-
-//  Global variables
-let localStream;
-let remoteStream;
-
-const mediaStreamConstraints = {
-    video: true,
-    audio: false,
-};
-
-// Handles success by adding the MediaStream to the video element.
-function gotLocalMediaStream(mediaStream) {
-    localStream = mediaStream;
-    localVideo.srcObject = mediaStream;
-
-    getStreamButton.disabled = true;
-
-    signalingClient.sendMessage('got user media');
-}
-
-function gotRemoteMediaStream(event) {
-    const mediaStream = event.stream;
-    remoteVideo.srcObject = mediaStream;
-    remoteStream = mediaStream;
-
-    trace('Remote peer connection received remote stream.');
-}
-
-// Handles error by logging a message to the console with the error message.
-function handleLocalMediaStreamError(error) {
-    console.log('navigator.getUserMedia error: ', error);
-}
-
 window.onbeforeunload = function() {
     signalingClient.sendMessage('bye');
 };
 
 ////////////////////////////////////////////////////////////////////////////
-
-
-function hangup() {
-    console.log('Hanging up.');
-    stop();
-    signalingClient.sendMessage('bye');
-}
-
-function handleRemoteHangup() {
-    console.log('Session terminated.');
-    stop();
-    signalingClient._initiator = false;
-}
-
-function stop() {
-    signalingClient._started = false;
-    pc.close();
-    pc = null;
-}
 
 // Logs an action (text) and the time when it happened on the console.
 function trace(text) {

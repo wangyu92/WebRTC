@@ -20,11 +20,14 @@ var app = http.createServer(options, function(req, res) {
 var io = socketIO.listen(app);
 io.sockets.on('connection', function(socket) {
 
-    socket.on('message', function(message, room) {
+    socket.on('message', function(message) {
         log('Client said: ', message);
+
+        let obj = JSON.parse(message);
+
         // for a real app, would be room-only (not broadcast)
-        socket.broadcast.emit('message', message);
-        // socket.to(room).emit('message', message);
+        // socket.broadcast.emit('message', message);
+        socket.to(obj.room).emit('message', obj.msg);
     });
 
     socket.on('create or join', function(room) {

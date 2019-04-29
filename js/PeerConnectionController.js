@@ -135,4 +135,8 @@ class PeerConnectionController {
         });
         this._peerConnection.addIceCandidate(candidate);
     }
+
+    close() {
+        this._peerConnection.close();
+    }
 }

@@ -11,8 +11,8 @@ class SignalingClient {
      * ICE Server를 지정하여 클래스의 인스턴스를 생성.
      * @param {[type]} iceServers [description]
      */
-    constructor(iceServers) {
-        this._server = "https://ms.hanyang.ac.kr:8800";
+    constructor(signalingServer, iceServers) {
+        this._server = signalingServer;
         this._iceServer = iceServers;
         this._socket = io(this._server);
 
@@ -80,8 +80,10 @@ class SignalingClient {
      * @return {[type]}         [description]
      */
     sendMessage(message) {
-        console.log('Client sending message: ', message);
-        this._socket.emit('message', message);
+        let obj = new Object({});
+        obj.room = this._roomName;
+        obj.msg = message;
+        this._socket.emit('message', JSON.stringify(obj));
     }
 
     /**
@@ -204,5 +206,12 @@ class SignalingClient {
         this._socket.on('log', function(array) {
             console.log.apply(console, array);
         });
+    }
+
+    close() {
+        this._socket.close();
+        this._initiator = false;
+        this._channelReady = false;
+        this._started = false;
     }
 }

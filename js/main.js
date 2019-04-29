@@ -1,7 +1,6 @@
 "use strict";
 
 let pc;
-let turnReady;
 
 const iceServers = {
     // 'iceTransportPolicy': 'relay',
@@ -30,6 +29,7 @@ const iceServers = {
 };
 
 let signalingClient = new SignalingClient(iceServers);
+let peerConnectionController = new PeerConnectionController();
 let room;
 
 ////////////////////////////////////////////////////////////////////////////
@@ -54,13 +54,26 @@ getStreamButton.onclick = function() {
 };
 
 callButton.onclick = function() {
-    doCall();
+    peerConnectionController.call();
 };
 
 hangupButton.onclick = function() {
     hangup();
     handleRemoteHangup();
 };
+
+////////////////////////////////////////////////////////////////////////////
+//  Inbox
+function tryToConnectAndAddStream() {
+    if(!signalingClient.isStarted() && typeof localStream !== 'undefined') {
+        peerConnectionController.createConnection(iceServers);
+        peerConnectionController.addStream(localStream);
+
+        if (signalingClient._initiator) {
+            callButton.disabled = false;
+        }
+    }
+}
 
 ////////////////////////////////////////////////////////////////////////////
 //  Set event listener for signaling
@@ -80,23 +93,33 @@ signalingClient.setEventListener('join', room => {
 signalingClient.setEventListener('message', message => {
     console.log('Client received message:', message);
 
+    //  Signaling를 통해 상대방이 Media Stream을 열면 해당 메시지를 수신.
     if (message === 'got user media') {
-        maybeStart();
-    } else if (message.type === 'offer') {
+        tryToConnectAndAddStream();
+    }
+
+    //  offer 메시지를 받았을 때
+    //  일반적으로 방 생성자가 아닌 사람이 수신
+    else if (message.type === 'offer') {
         if (!signalingClient.isInitiator() && !signalingClient.isStarted()) {
-            maybeStart();
+            tryToConnectAndAddStream();
         }
-        pc.setRemoteDescription(new RTCSessionDescription(message));
-        doAnswer();
-    } else if (message.type === 'answer' && signalingClient.isStarted()) {
-        pc.setRemoteDescription(new RTCSessionDescription(message));
-    } else if (message.type === 'candidate' && signalingClient.isStarted()) {
-        var candidate = new RTCIceCandidate({
-            sdpMLineIndex: message.label,
-            candidate: message.candidate
-        });
-        pc.addIceCandidate(candidate);
-    } else if (message === 'bye' && signalingClient.isStarted()) {
+        peerConnectionController.setRemoteDescription(new RTCSessionDescription(message));
+        peerConnectionController.answer();
+    }
+
+    //  answer 메시지를 받았을 때
+    else if (message.type === 'answer' && signalingClient.isStarted()) {
+        if(signalingClient.isStarted()) {
+            peerConnectionController.setRemoteDescription(new RTCSessionDescription(message));
+        }
+    }
+
+    else if (message.type === 'candidate' && signalingClient.isStarted()) {
+        peerConnectionController.addIceCandidate(message);
+    }
+
+    else if (message === 'bye' && signalingClient.isStarted()) {
         handleRemoteHangup();
     }
 });
@@ -104,6 +127,53 @@ signalingClient.setEventListener('message', message => {
 signalingClient.setEventListener('connect_error', error => {
     getStreamButton.disabled = true;
     hangupButton.disabled = true;
+});
+
+////////////////////////////////////////////////////////////////////////////
+//  Set event listener for PeerConnectionController
+peerConnectionController.setEventListener('peer connection created', () => {
+    signalingClient.setStarted(true);
+});
+
+peerConnectionController.setEventListener('peer connection failed', (e) => {
+    signalingClient.setStarted(false);
+});
+
+peerConnectionController.setEventListener('handleIceCandidate', (event) => {
+    console.log('icecandidate event: ', event);
+    if (event.candidate) {
+        signalingClient.sendMessage({
+            type: 'candidate',
+            label: event.candidate.sdpMLineIndex,
+            id: event.candidate.sdpMid,
+            candidate: event.candidate.candidate
+        });
+    } else {
+        console.log('End of candidates.');
+    }
+});
+
+peerConnectionController.setEventListener('handleRemoteStreamAdded', (event) => {
+    console.log('Remote stream added.');
+    remoteStream = event.stream;
+    remoteVideo.srcObject = remoteStream;
+});
+
+peerConnectionController.setEventListener('handleRemoteStreamRemoved', (event) => {
+    console.log('Remote stream removed. Event: ', event);
+});
+
+peerConnectionController.setEventListener('setLocalAndSendMessage', (sessionDescription) => {
+    console.log('setLocalAndSendMessage sending message', sessionDescription);
+    signalingClient.sendMessage(sessionDescription);
+});
+
+peerConnectionController.setEventListener('handleCreateOfferError', (event) => {
+    console.log('createOffer() error: ', event);
+});
+
+peerConnectionController.setEventListener('onCreateSessionDescriptionError', (error) => {
+    trace('Failed to create session description: ' + error.toString());
 });
 
 ////////////////////////////////////////////////////////////////////////////
@@ -115,7 +185,7 @@ let remoteStream;
 
 const mediaStreamConstraints = {
     video: true,
-    audio: true,
+    audio: false,
 };
 
 // Handles success by adding the MediaStream to the video element.
@@ -126,11 +196,6 @@ function gotLocalMediaStream(mediaStream) {
     getStreamButton.disabled = true;
 
     signalingClient.sendMessage('got user media');
-    if (signalingClient.isInitiator()) {
-        maybeStart();
-    }
-
-    initBandwidthGraph();
 }
 
 function gotRemoteMediaStream(event) {
@@ -146,65 +211,9 @@ function handleLocalMediaStreamError(error) {
     console.log('navigator.getUserMedia error: ', error);
 }
 
-
-
-////////////////////////////////////////////////////////////////////////////
-//  Events for videos
-
-function logVideoLoaded(event) {
-    const video = event.target;
-    trace(`${video.id} videoWidth: ${video.videoWidth}px, ` +
-        `videoHeight: ${video.videoHeight}px.`);
-}
-
-// Logs a message with the id and size of a video element.
-// This event is fired when video begins streaming.
-function logResizedVideo(event) {
-    logVideoLoaded(event);
-
-    if (startTime) {
-        const elapsedTime = window.performance.now() - startTime;
-        startTime = null;
-        trace(`Setup time: ${elapsedTime.toFixed(3)}ms.`);
-    }
-}
-
-localVideo.addEventListener('loadedmetadata', logVideoLoaded);
-remoteVideo.addEventListener('loadedmetadata', logVideoLoaded);
-remoteVideo.addEventListener('onresize', logResizedVideo);
-
 window.onbeforeunload = function() {
     signalingClient.sendMessage('bye');
 };
-
-////////////////////////////////////////////////////////////////////////////
-
-function doCall() {
-    console.log('Sending offer to peer');
-    pc.createOffer(setLocalAndSendMessage, handleCreateOfferError);
-}
-
-function doAnswer() {
-    console.log('Sending answer to peer.');
-    pc.createAnswer().then(
-        setLocalAndSendMessage,
-        onCreateSessionDescriptionError
-    );
-}
-
-function setLocalAndSendMessage(sessionDescription) {
-    pc.setLocalDescription(sessionDescription);
-    console.log('setLocalAndSendMessage sending message', sessionDescription);
-    signalingClient.sendMessage(sessionDescription);
-}
-
-function handleCreateOfferError(event) {
-    console.log('createOffer() error: ', event);
-}
-
-function onCreateSessionDescriptionError(error) {
-    trace('Failed to create session description: ' + error.toString());
-}
 
 ////////////////////////////////////////////////////////////////////////////
 
@@ -226,153 +235,6 @@ function stop() {
     pc.close();
     pc = null;
 }
-
-
-
-////////////////////////////////////////////////////////////////////////////
-//  Bandwidth
-
-let bandwidthSelector = document.querySelector('select#bandwidth');
-
-
-let maxBandwidth = 0;
-
-let bitrateGraph;
-let bitrateSeries;
-
-let packetGraph;
-let packetSeries;
-
-let lastResult;
-
-function initBandwidthGraph() {
-    bitrateSeries = new TimelineDataSeries();
-    bitrateGraph = new TimelineGraphView('bitrateGraph', 'bitrateCanvas');
-    bitrateGraph.updateEndDate();
-
-    packetSeries = new TimelineDataSeries();
-    packetGraph = new TimelineGraphView('packetGraph', 'packetCanvas');
-    packetGraph.updateEndDate();
-}
-
-// renegotiate bandwidth on the fly.
-bandwidthSelector.onchange = () => {
-    bandwidthSelector.disabled = true;
-    const bandwidth = bandwidthSelector.options[bandwidthSelector.selectedIndex].value;
-
-    // In Chrome, use RTCRtpSender.setParameters to change bandwidth without
-    // (local) renegotiation. Note that this will be within the envelope of
-    // the initial maximum bandwidth negotiated via SDP.
-    if ((adapter.browserDetails.browser === 'chrome' ||
-            (adapter.browserDetails.browser === 'firefox' &&
-                adapter.browserDetails.version >= 64)) &&
-        'RTCRtpSender' in window &&
-        'setParameters' in window.RTCRtpSender.prototype) {
-        const sender = pc.getSenders()[0];
-        const parameters = sender.getParameters();
-        if (!parameters.encodings) {
-            parameters.encodings = [{}];
-        }
-        if (bandwidth === 'unlimited') {
-            delete parameters.encodings[0].maxBitrate;
-        } else {
-            parameters.encodings[0].maxBitrate = bandwidth * 1000;
-        }
-        sender.setParameters(parameters)
-            .then(() => {
-                bandwidthSelector.disabled = false;
-            })
-            .catch(e => console.error(e));
-        return;
-    }
-    // Fallback to the SDP munging with local renegotiation way of limiting
-    // the bandwidth.
-    pc.createOffer()
-        .then(offer => pc.setLocalDescription(offer))
-        .then(() => {
-            const desc = {
-                type: pc.remoteDescription.type,
-                sdp: bandwidth === 'unlimited' ?
-                    removeBandwidthRestriction(pc.remoteDescription.sdp) : updateBandwidthRestriction(pc.remoteDescription.sdp, bandwidth)
-            };
-            console.log('Applying bandwidth restriction to setRemoteDescription:\n' +
-                desc.sdp);
-            return pc.setRemoteDescription(desc);
-        })
-        .then(() => {
-            bandwidthSelector.disabled = false;
-        })
-        .catch(onSetSessionDescriptionError);
-};
-
-function updateBandwidthRestriction(sdp, bandwidth) {
-    let modifier = 'AS';
-    if (adapter.browserDetails.browser === 'firefox') {
-        bandwidth = (bandwidth >>> 0) * 1000;
-        modifier = 'TIAS';
-    }
-    if (sdp.indexOf('b=' + modifier + ':') === -1) {
-        // insert b= after c= line.
-        sdp = sdp.replace(/c=IN (.*)\r\n/, 'c=IN $1\r\nb=' + modifier + ':' + bandwidth + '\r\n');
-    } else {
-        sdp = sdp.replace(new RegExp('b=' + modifier + ':.*\r\n'), 'b=' + modifier + ':' + bandwidth + '\r\n');
-    }
-    return sdp;
-}
-
-function removeBandwidthRestriction(sdp) {
-    return sdp.replace(/b=AS:.*\r\n/, '').replace(/b=TIAS:.*\r\n/, '');
-}
-
-// query getStats every second
-window.setInterval(() => {
-    if (!pc) {
-        return;
-    }
-    const sender = pc.getSenders()[0];
-    if (!sender) {
-        return;
-    }
-    sender.getStats().then(res => {
-        res.forEach(report => {
-            let bytes;
-            let packets;
-            if (report.type === 'outbound-rtp') {
-                if (report.isRemote) {
-                    return;
-                }
-                const now = report.timestamp;
-                bytes = report.bytesSent;
-                packets = report.packetsSent;
-                if (lastResult && lastResult.has(report.id)) {
-                    // calculate bitrate
-                    const bitrate = 8 * (bytes - lastResult.get(report.id).bytesSent) /
-                        (now - lastResult.get(report.id).timestamp);
-
-                    // append to chart
-                    bitrateSeries.addPoint(now, bitrate);
-                    bitrateGraph.setDataSeries([bitrateSeries]);
-                    bitrateGraph.updateEndDate();
-
-                    // calculate number of packets and append to chart
-                    packetSeries.addPoint(now, packets -
-                        lastResult.get(report.id).packetsSent);
-                    packetGraph.setDataSeries([packetSeries]);
-                    packetGraph.updateEndDate();
-                }
-            }
-        });
-        lastResult = res;
-    });
-}, 1000);
-
-
-////////////////////////////////////////////////////////////////////////////
-//  Utils & for log
-
-let startTime = null;
-
-
 
 // Logs an action (text) and the time when it happened on the console.
 function trace(text) {

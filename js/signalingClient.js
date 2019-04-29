@@ -61,8 +61,16 @@ class SignalingClient {
         return this._channelReady;
     }
 
+    /**
+     * 서로 통신하고 있는지
+     * @return {Boolean} [description]
+     */
     isStarted() {
         return this._started;
+    }
+
+    setStarted(bool) {
+        this._started = bool;
     }
 
     /**

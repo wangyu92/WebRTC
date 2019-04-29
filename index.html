@@ -42,33 +42,6 @@
             <video id="remote-video" class="col-md-6 col-xs-6" autoplay playsinline></video>
         </div>
 
-        <div class="row">
-            <div id="buttons">
-                <label>Bandwidth:</label>
-                <select id="bandwidth">
-                    <option value="unlimited" selected>unlimited</option>
-                    <option value="2000">2000</option>
-                    <option value="1000">1000</option>
-                    <option value="500">500</option>
-                    <option value="250">250</option>
-                    <option value="125">125</option>
-                </select>
-                kbps
-            </div>
-        </div>
-
-        <div class="row">
-            <div class="graph-container col-md-6 col-xs-12" id="bitrateGraph">
-                <span class="label label-default">Bitrate</span><br/><br/>
-                <canvas id="bitrateCanvas"></canvas>
-            </div>
-
-            <div class="graph-container col-md-6 col-xs-12" id="packetGraph">
-                <span class="label label-default">Packets sent per second</span><br/><br/>
-                <canvas id="packetCanvas"></canvas>
-            </div>
-        </div>
-
     </div>
 
     <script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
@@ -77,6 +50,7 @@
     <script src="https://cdn.socket.io/socket.io-1.0.0.js"></script>
     <script src="third_party/graph.js"></script>
     <script src="js/signalingClient.js"></script>
+    <script src="js/PeerConnectionController.js"></script>
     <script src="js/main.js"></script>
 </body>
 
